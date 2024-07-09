@@ -1,0 +1,4 @@
+(executable
+ (public_name mina_tx_csv)
+ (name main)
+ (libraries cohttp cohttp-lwt-unix lwt xml-light calendar))
