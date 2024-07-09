@@ -14,8 +14,59 @@ let _usd_eur =
   Printf.printf "Body of length: %d\n" (String.length body);
   body
 
+module Tx = struct
+  type t = {
+    amount : int;
+    fee : int;
+    hash : string;
+    date : string;
+    src : string;
+    dst : string;
+    memo : string;
+  }
 
-let () = Format.printf "Computing Mina csv@."
+  let pp_csv ppf { amount; fee; hash; date; src; dst; memo } =
+    Format.fprintf ppf "%s,%d,%s,%s,%d,%s,%s" date amount src dst fee hash memo
+end
+
+let transactions_to_csv txs =
+  let txs =
+    Ezjsonm.get_list
+      (fun tx ->
+        let o = Ezjsonm.get_dict tx in
+        let get decode key = List.assoc key o |> decode in
+        let amount = get Ezjsonm.get_int "amount" in
+        let fee = get Ezjsonm.get_int "fee" in
+        let hash = get Ezjsonm.get_string "hash" in
+        let date = get Ezjsonm.get_string "dateTime" in
+        let src = get Ezjsonm.get_string "from" in
+        let dst = get Ezjsonm.get_string "to" in
+        let memo =
+          Tezos_base58.Base58 (get Ezjsonm.get_string "memo")
+          |> Tezos_base58.decode ~prefix:""
+          |> Option.value ~default:""
+        in
+        { Tx.amount; fee; hash; date; src; dst; memo })
+      txs
+  in
+  txs
+
+let () =
+  Format.printf "Computing Mina csv@.";
+  let filename = Sys.argv.(1) in
+  let ic = open_in filename in
+  let json = Ezjsonm.from_channel ic in
+  close_in ic;
+  let txs = transactions_to_csv json in
+  Format.printf "Got %d txs@." (List.length txs);
+  Format.open_vbox 0;
+  List.iter
+    (fun e ->
+      Tx.pp_csv Format.std_formatter e;
+      Format.print_cut ())
+    txs;
+  Format.close_box ()
+
 (* let () =
  *   let body = Lwt_main.run usd_eur in
  *   let elts = Finance.Bce.parse_data body in
