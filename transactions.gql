@@ -1,0 +1,15 @@
+query F { transactions(limit: 100000, sortBy: DATETIME_DESC, query: { canonical: true, OR: [{to: "B62qip7NtNvAnqkEY6oZZCtn9x2YHY8kQaP6ddBYuhhrzpFbeW3abc5"}, {from: "B62qip7NtNvAnqkEY6oZZCtn9x2YHY8kQaP6ddBYuhhrzpFbeW3abc5"}]}) {
+                        fee
+                        from
+                        to
+                        nonce
+                        amount
+                        memo
+                        hash
+                        kind
+                        dateTime
+                        block {
+                            blockHeight
+                            stateHash
+                        }
+                    }}
