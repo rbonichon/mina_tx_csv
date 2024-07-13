@@ -88,25 +88,39 @@ module Transactions = struct
   end
 end
 
-let addr = "B62qip7NtNvAnqkEY6oZZCtn9x2YHY8kQaP6ddBYuhhrzpFbeW3abc5"
+module Params = struct
+  let addr = ref "B62qip7NtNvAnqkEY6oZZCtn9x2YHY8kQaP6ddBYuhhrzpFbeW3abc5"
+  let limit = ref 10000
 
-let body =
+  let set_node_uri, get_node_uri =
+    let value = ref (Uri.of_string "https://graphql.minaexplorer.com") in
+    ((fun s -> value := Uri.of_string s), fun () -> !value)
+end
+
+let args =
+  Arg.align
+    [
+      ( "-addr",
+        Arg.Set_string Params.addr,
+        " set account address for which to get transactions history" );
+      ("-limit", Arg.Set_int Params.limit, " get at most <limit> transactions");
+      ("-url", Arg.String Params.set_node_uri, " query endpoint at <url>");
+    ]
+
+let build_query limit addr =
+  Printf.sprintf
+    "query F { transactions(limit: %d, sortBy: DATETIME_DESC, query: { \
+     canonical: true, OR: [{to: %S}, {from: %S}]}) { fee from to nonce amount \
+     memo hash kind dateTime block { blockHeight stateHash } }}"
+    limit addr addr
+
+let body limit addr =
   let open Lwt in
   let open Cohttp in
   let open Cohttp_lwt_unix in
   let headers = Header.init_with "Content-Type" "application/json" in
-  let uri = Uri.of_string "https://graphql.minaexplorer.com" in
-  Lwt_io.open_file ~mode:Lwt_io.Input "./transactions.gql" >>= fun ic ->
-  let stream = Lwt_io.read_lines ic in
-  let b = Buffer.create 1024 in
-  Lwt_stream.iter_s
-    (fun line ->
-      Buffer.add_string b line;
-      Buffer.add_char b ' ';
-      Lwt.return_unit)
-    stream
-  >>= fun () ->
-  let body_s = Printf.sprintf "{\"query\": %S}" (Buffer.contents b) in
+  let uri = Params.get_node_uri () in
+  let body_s = Printf.sprintf "{\"query\": %S}" (build_query limit addr) in
   let body = Cohttp_lwt.Body.of_string body_s in
   Client.post ~headers ~body uri >>= fun (resp, body) ->
   let code = resp |> Response.status |> Code.code_of_status in
@@ -124,18 +138,23 @@ let extract_data json_resp =
 
 let () =
   Format.printf "Computing Mina csv@.";
+  Arg.parse args (fun _ -> ()) "";
+  let addr = !Params.addr in
+  let limit = !Params.limit in
   let txs =
     if Array.length Sys.argv > 1 then (
       let filename = Sys.argv.(1) in
       assert (Sys.file_exists filename);
-      Transactions.of_file addr filename)
+      Transactions.of_file !Params.addr filename)
     else
-      let body = Lwt_main.run body in
-      Ezjsonm.from_string body |> extract_data |> Transactions.of_json addr
+      let body = Lwt_main.run @@ body limit addr in
+      Ezjsonm.from_string body |> extract_data
+      |> Transactions.of_json !Params.addr
   in
   Format.printf "Got %d txs@." (List.length txs);
   let oc, ppf =
-    let oc = open_out_bin "koinly.csv" in
+    let filename = Printf.sprintf "koinly_%s.csv" !Params.addr in
+    let oc = open_out_bin filename in
     (oc, Format.formatter_of_out_channel oc)
   in
   Format.fprintf ppf "%a@." Transactions.Csv.pp txs;
