@@ -1,15 +1,29 @@
 module Operation = struct
-  type t = Withdrawal | Payment
+  type t = Withdrawal | Deposit
 
   let pp ppf = function
     | Withdrawal -> Format.fprintf ppf "withdrawal"
-    | Payment -> Format.fprintf ppf "payment"
+    | Deposit -> Format.fprintf ppf "deposit"
+end
+
+module Decimal = struct
+  type t = int * int
+
+  let of_nano =
+    let div = 1_000_000_000 in
+    fun n : t -> (n / div, n mod div)
+
+  let pp ppf (d, v) = Format.fprintf ppf "%d.%09d" d v
 end
 
 module Tx = struct
+  type nano = int
+
+  let pp_nano ppf n = Decimal.pp ppf (Decimal.of_nano n)
+
   type t = {
-    amount : int;
-    fee : int;
+    amount : nano;
+    fee : nano;
     hash : string;
     date : string;
     src : string;
@@ -38,10 +52,16 @@ module Transactions = struct
           let date = get Ezjsonm.get_string "dateTime" in
           let src = get Ezjsonm.get_string "from" in
           let dst = get Ezjsonm.get_string "to" in
-          let descr = decode_base58_string (get Ezjsonm.get_string "memo") in
+          let descr =
+            let s = decode_base58_string (get Ezjsonm.get_string "memo") in
+            let s = String.sub s 3 (String.length s - 3) |> String.trim in
+            let b = Buffer.create (String.length s) in
+            String.iter (function '\x00' -> () | c -> Buffer.add_char b c) s;
+            Buffer.contents b
+          in
           let op_type =
             let open Operation in
-            if String.equal src addr then Withdrawal else Payment
+            if String.equal src addr then Withdrawal else Deposit
           in
           { Tx.amount; fee; hash; date; src; dst; descr; op_type })
         txs
@@ -54,7 +74,7 @@ module Transactions = struct
         let op =
           match op_type with
           | Operation.Withdrawal -> Int.sub
-          | Operation.Payment -> Int.add
+          | Operation.Deposit -> Int.add
         in
         op sum amount)
       0 txs
@@ -67,8 +87,16 @@ module Transactions = struct
 
   module Csv = struct
     let pp_row ppf { Tx.amount; fee; hash; date; src; dst; descr; op_type } =
-      Format.fprintf ppf "%s,%d,MINA,,%s,,USD,%s,%a,%s,%s,%d" date amount hash
-        descr Operation.pp op_type src dst fee
+      let amount =
+        match op_type with
+        | Operation.Deposit -> amount
+        | Withdrawal -> amount + fee
+      in
+      let fee =
+        match op_type with Operation.Deposit -> 0 | Withdrawal -> fee
+      in
+      Format.fprintf ppf "%s,%a,MINA,,%s,,USD,%s,%a,%s,%s,%d" date Tx.pp_nano
+        amount hash descr Operation.pp op_type src dst fee
 
     let pp_headers ppf () =
       Format.fprintf ppf
@@ -150,6 +178,7 @@ let () =
       let body = Lwt_main.run @@ body limit addr in
       Ezjsonm.from_string body |> extract_data
       |> Transactions.of_json !Params.addr
+      |> List.rev
   in
   Format.printf "Got %d txs@." (List.length txs);
   let oc, ppf =
