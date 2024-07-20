@@ -16,6 +16,7 @@ let
       camlpkgs.cohttp-lwt-unix
       camlpkgs.ezjsonm
       camlpkgs.tezos-base58
+      camlpkgs.utop
     ];
 in
 rec {
