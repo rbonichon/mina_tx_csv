@@ -142,30 +142,33 @@ let build_query limit addr =
      memo hash kind dateTime block { blockHeight stateHash } }}"
     limit addr addr
 
+let extract_data json_resp =
+  let open Ezjsonm in
+  get_dict json_resp |> List.assoc "data" |> get_dict
+  |> List.assoc "transactions"
+
+let parse_body body =
+  Ezjsonm.from_string body |> extract_data
+  |> Transactions.of_json !Params.addr
+  |> List.rev
+
 let body limit addr =
   let open Lwt in
   let open Cohttp in
   let open Cohttp_lwt_unix in
   let headers = Header.init_with "Content-Type" "application/json" in
   let uri = Params.get_node_uri () in
-  let body_s = Printf.sprintf "{\"query\": %S}" (build_query limit addr) in
-  let body = Cohttp_lwt.Body.of_string body_s in
+  let body =
+    let body_s = Printf.sprintf "{\"query\": %S}" (build_query limit addr) in
+    Cohttp_lwt.Body.of_string body_s
+  in
   Client.post ~headers ~body uri >>= fun (resp, body) ->
-  let code = resp |> Response.status |> Code.code_of_status in
-  Printf.printf "Response code: %d\n" code;
-  Printf.printf "Headers: %s\n" (resp |> Response.headers |> Header.to_string);
-  body |> Cohttp_lwt.Body.to_string >|= fun body ->
-  Printf.printf "Body of length: %d\n" (String.length body);
-  Format.printf "%s@." body;
-  body
+  let _code = resp |> Response.status |> Code.code_of_status in
+  body |> Cohttp_lwt.Body.to_string >|= parse_body
 
-let extract_data json_resp =
-  let open Ezjsonm in
-  get_dict json_resp |> List.assoc "data" |> get_dict
-  |> List.assoc "transactions"
+let emit_done () = Format.printf "done@."
 
 let () =
-  Format.printf "Computing Mina csv@.";
   Arg.parse args (fun _ -> ()) "";
   let addr = !Params.addr in
   let limit = !Params.limit in
@@ -174,18 +177,17 @@ let () =
       let filename = Sys.argv.(1) in
       assert (Sys.file_exists filename);
       Transactions.of_file !Params.addr filename)
-    else
-      let body = Lwt_main.run @@ body limit addr in
-      Ezjsonm.from_string body |> extract_data
-      |> Transactions.of_json !Params.addr
-      |> List.rev
+    else Lwt_main.run @@ body limit addr
   in
-  Format.printf "Got %d txs@." (List.length txs);
   let oc, ppf =
     let filename = Printf.sprintf "koinly_%s.csv" !Params.addr in
+    Format.printf "Writing file %s ... " filename;
     let oc = open_out_bin filename in
     (oc, Format.formatter_of_out_channel oc)
   in
   Format.fprintf ppf "%a@." Transactions.Csv.pp txs;
   close_out oc;
-  Format.printf "Total: %d@." (Transactions.total txs)
+  emit_done ();
+  let total = Decimal.of_nano @@ Transactions.total txs in
+  Format.printf "@[<h>Total: %a MINA (%d txs)@]@." Decimal.pp total
+    (List.length txs)
