@@ -152,6 +152,15 @@ let parse_body body =
   |> Transactions.of_json !Params.addr
   |> List.rev
 
+let trace ~f ppf txt =
+  Format.kfprintf
+    (fun ppf ->
+      Format.pp_print_string ppf " ... ";
+      let res = f () in
+      Format.fprintf ppf "done@.";
+      res)
+    ppf txt
+
 let body limit addr =
   let open Lwt in
   let open Cohttp in
@@ -166,7 +175,13 @@ let body limit addr =
   let _code = resp |> Response.status |> Code.code_of_status in
   body |> Cohttp_lwt.Body.to_string >|= parse_body
 
-let emit_done () = Format.printf "done@."
+let output_csv ~filename ~txs () =
+  let oc, ppf =
+    let oc = open_out_bin filename in
+    (oc, Format.formatter_of_out_channel oc)
+  in
+  Format.fprintf ppf "%a@." Transactions.Csv.pp txs;
+  close_out oc
 
 let () =
   Arg.parse args (fun _ -> ()) "";
@@ -179,15 +194,9 @@ let () =
       Transactions.of_file !Params.addr filename)
     else Lwt_main.run @@ body limit addr
   in
-  let oc, ppf =
-    let filename = Printf.sprintf "koinly_%s.csv" !Params.addr in
-    Format.printf "Writing file %s ... " filename;
-    let oc = open_out_bin filename in
-    (oc, Format.formatter_of_out_channel oc)
-  in
-  Format.fprintf ppf "%a@." Transactions.Csv.pp txs;
-  close_out oc;
-  emit_done ();
+  let filename = Printf.sprintf "koinly_%s.csv" !Params.addr in
+  trace Format.std_formatter "Writing file %s" filename
+    ~f:(output_csv ~filename ~txs);
   let total = Decimal.of_nano @@ Transactions.total txs in
   Format.printf "@[<h>Total: %a MINA (%d txs)@]@." Decimal.pp total
     (List.length txs)
