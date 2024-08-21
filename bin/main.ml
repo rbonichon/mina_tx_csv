@@ -13,7 +13,15 @@ module Decimal = struct
     let div = 1_000_000_000 in
     fun n : t -> (n / div, n mod div)
 
-  let pp ppf (d, v) = Format.fprintf ppf "%d.%09d" d v
+  let pp ppf (d, v) =
+    let digits = 9 in
+    let rec actual_digits_to_print d v =
+      if v mod 10 = 0 then actual_digits_to_print (d - 1) (v / 10) else (d, v)
+    in
+    let ndigits, v = actual_digits_to_print digits v in
+    let fmt_str = Format.sprintf "%%d.%%0%dd" ndigits in
+    let fmt = Scanf.format_from_string fmt_str "%d.%d" in
+    Format.fprintf ppf fmt d v
 end
 
 module Tx = struct
