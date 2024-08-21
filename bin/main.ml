@@ -68,16 +68,16 @@ module Transactions = struct
     in
     txs
 
+  let account_creation_free = 1_000_000_000
+
   let total (txs : t) =
     List.fold_left
-      (fun sum { Tx.amount; op_type; _ } ->
-        let op =
-          match op_type with
-          | Operation.Withdrawal -> Int.sub
-          | Operation.Deposit -> Int.add
-        in
-        op sum amount)
+      (fun sum { Tx.amount; op_type; fee; _ } ->
+        match op_type with
+        | Operation.Withdrawal -> Int.sub sum (amount + fee)
+        | Operation.Deposit -> Int.add sum amount)
       0 txs
+    - account_creation_free
 
   let of_file addr filename =
     let ic = open_in filename in
