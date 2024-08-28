@@ -16,7 +16,9 @@ module Decimal = struct
   let pp ppf (d, v) =
     let digits = 9 in
     let rec actual_digits_to_print d v =
-      if v mod 10 = 0 then actual_digits_to_print (d - 1) (v / 10) else (d, v)
+      if v mod 10 = 0 then
+        if d = 1 then (1, v) else actual_digits_to_print (d - 1) (v / 10)
+      else (d, v)
     in
     let ndigits, v = actual_digits_to_print digits v in
     let fmt_str = Format.sprintf "%%d.%%0%dd" ndigits in
@@ -48,6 +50,8 @@ module Transactions = struct
     let open Tezos_base58 in
     match decode ~prefix:"" (Base58 str) with None -> "" | Some s -> s
 
+  let account_creation_fee = 1_000_000_000
+
   let of_json addr txs =
     let txs =
       Ezjsonm.get_list
@@ -74,9 +78,13 @@ module Transactions = struct
           { Tx.amount; fee; hash; date; src; dst; descr; op_type })
         txs
     in
-    txs
-
-  let account_creation_free = 1_000_000_000
+    match List.rev txs with
+    | [] -> []
+    | tx1 :: txs ->
+        List.rev
+        @@ tx1
+           :: { tx1 with amount = -account_creation_fee; descr = "Ledger Fee" }
+           :: txs
 
   let total (txs : t) =
     List.fold_left
@@ -85,7 +93,6 @@ module Transactions = struct
         | Operation.Withdrawal -> Int.sub sum (amount + fee)
         | Operation.Deposit -> Int.add sum amount)
       0 txs
-    - account_creation_free
 
   let of_file addr filename =
     let ic = open_in filename in
@@ -191,7 +198,8 @@ let output_csv ~filename ~txs () =
   Format.fprintf ppf "%a@." Transactions.Csv.pp txs;
   close_out oc
 
-let () =
+let main () =
+  let open Lwt.Syntax in
   Arg.parse args (fun _ -> ()) "";
   let addr = !Params.addr in
   let limit = !Params.limit in
@@ -205,6 +213,15 @@ let () =
   let filename = Printf.sprintf "koinly_%s.csv" !Params.addr in
   trace Format.std_formatter "Writing file %s" filename
     ~f:(output_csv ~filename ~txs);
-  let total = Decimal.of_nano @@ Transactions.total txs in
+  let tx_total = Transactions.total txs in
+  let total = Decimal.of_nano tx_total in
   Format.printf "@[<h>Total: %a MINA (%d txs)@]@." Decimal.pp total
-    (List.length txs)
+    (List.length txs);
+  let* rate = Coingecko.mina_eur_rate () in
+  let rated_tx_total =
+    rate *. float_of_int tx_total |> truncate |> Decimal.of_nano
+  in
+  Format.printf "@[<h>Total €: %a@]@." Decimal.pp rated_tx_total;
+  Lwt.return_unit
+
+let () = Lwt_main.run @@ main ()
