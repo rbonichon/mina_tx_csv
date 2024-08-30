@@ -31,16 +31,28 @@ module Tx = struct
 
   let pp_nano ppf n = Decimal.pp ppf (Decimal.of_nano n)
 
-  type t = {
-    amount : nano;
-    fee : nano;
-    hash : string;
-    date : string;
-    src : string;
-    dst : string;
-    descr : string;
-    op_type : Operation.t;
-  }
+  type t =
+    | Concrete of {
+        amount : nano;
+        fee : nano;
+        hash : string;
+        date : string;
+        src : string;
+        dst : string;
+        descr : string;
+        op_type : Operation.t;
+      }
+    | Pseudo of { amount : nano; date : string; hash : string; descr : string }
+
+  let[@warning "-8"] pseudo_of_concrete ~amount ?descr (Concrete { date; hash; descr = d; _ })
+      =
+    Pseudo
+      {
+        amount;
+        date;
+        hash;
+        descr = (match descr with None -> d | Some text -> text);
+      }
 end
 
 module Transactions = struct
@@ -75,7 +87,7 @@ module Transactions = struct
             let open Operation in
             if String.equal src addr then Withdrawal else Deposit
           in
-          { Tx.amount; fee; hash; date; src; dst; descr; op_type })
+          Tx.Concrete { amount; fee; hash; date; src; dst; descr; op_type })
         txs
     in
     match List.rev txs with
@@ -83,15 +95,19 @@ module Transactions = struct
     | tx1 :: txs ->
         List.rev
         @@ tx1
-           :: { tx1 with amount = -account_creation_fee; descr = "Ledger Fee" }
+           :: Tx.pseudo_of_concrete ~amount:(-account_creation_fee)
+                ~descr:"Ledger Fee" tx1
            :: txs
 
   let total (txs : t) =
     List.fold_left
-      (fun sum { Tx.amount; op_type; fee; _ } ->
-        match op_type with
-        | Operation.Withdrawal -> Int.sub sum (amount + fee)
-        | Operation.Deposit -> Int.add sum amount)
+      (fun sum tx ->
+        match tx with
+        | Tx.Concrete { amount; op_type; fee; _ } -> (
+            match op_type with
+            | Operation.Withdrawal -> Int.sub sum (amount + fee)
+            | Operation.Deposit -> Int.add sum amount)
+        | Tx.Pseudo { amount; _ } -> Int.add sum amount)
       0 txs
 
   let of_file addr filename =
@@ -101,17 +117,21 @@ module Transactions = struct
     of_json addr json
 
   module Csv = struct
-    let pp_row ppf { Tx.amount; fee; hash; date; src; dst; descr; op_type } =
-      let amount =
-        match op_type with
-        | Operation.Deposit -> amount
-        | Withdrawal -> amount + fee
-      in
-      let fee =
-        match op_type with Operation.Deposit -> 0 | Withdrawal -> fee
-      in
-      Format.fprintf ppf "%s,%a,MINA,,%s,,USD,%s,%a,%s,%s,%d" date Tx.pp_nano
-        amount hash descr Operation.pp op_type src dst fee
+    let pp_row ppf = function
+      | Tx.Concrete { amount; fee; hash; date; src; dst; descr; op_type } ->
+          let amount =
+            match op_type with
+            | Operation.Deposit -> amount
+            | Withdrawal -> amount + fee
+          in
+          let fee =
+            match op_type with Operation.Deposit -> 0 | Withdrawal -> fee
+          in
+          Format.fprintf ppf "%s,%a,MINA,,%s,,USD,%s,%a,%s,%s,%d" date
+            Tx.pp_nano amount hash descr Operation.pp op_type src dst fee
+      | Tx.Pseudo { amount; date; hash; descr } ->
+          Format.fprintf ppf "%s,%a,MINA,,%s,,USD,%s,deposit,,," date Tx.pp_nano
+            amount hash descr
 
     let pp_headers ppf () =
       Format.fprintf ppf
