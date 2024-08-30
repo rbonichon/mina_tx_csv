@@ -84,8 +84,16 @@ module Transactions = struct
             Buffer.contents b
           in
           let op_type =
-            let open Operation in
-            if String.equal src addr then Withdrawal else Deposit
+            if String.equal src addr then Operation.Withdrawal
+            else if String.equal dst addr then Operation.Deposit
+            else
+              (* This transaction does not belong here *)
+              (* TODO: Filter out these transactions, possibly emitting a
+                 warning message *)
+              failwith
+                (Format.asprintf
+                   "[@<v 2>of_json: tx unrelated to address %s@,%s@]" addr
+                   (Ezjsonm.value_to_string tx))
           in
           Tx.Concrete { amount; fee; hash; date; src; dst; descr; op_type })
         txs
@@ -94,7 +102,7 @@ module Transactions = struct
     | [] -> []
     | tx1 :: txs ->
         List.rev
-        @@ tx1
+        @@ tx1 (* Insert implicit transaction regargin account creation *)
            :: Tx.pseudo_of_concrete ~amount:(-account_creation_fee)
                 ~descr:"Ledger Fee" tx1
            :: txs
@@ -231,25 +239,31 @@ let main () =
   let open Lwt.Syntax in
   let other_args = ref [] in
   Arg.parse args (fun s -> other_args := s :: !other_args) "";
-  let other_args = List.rev !other_args in
 
+  let other_args = List.rev !other_args in
   let addr = Params.get_addr () in
   let limit = !Params.limit in
+
+  (* Compute transactions *)
   let* txs =
     match other_args with
     | filename :: _ ->
         assert (Sys.file_exists filename);
-        Lwt.return @@ Transactions.of_file addr filename 
+        Lwt.return @@ Transactions.of_file addr filename
     | [] -> body limit addr
   in
 
+  (* Emit csv *)
   let filename = Printf.sprintf "koinly_%s.csv" addr in
   trace Format.std_formatter "Writing file %s" filename
     ~f:(output_csv ~filename ~txs);
+
+  (* Emit other information on stdout for the user *)
   let tx_total = Transactions.total txs in
   let total = Decimal.of_nano tx_total in
   Format.printf "@[<h>Total: %a MINA (%d txs)@]@." Decimal.pp total
     (List.length txs);
+
   let* rate = Coingecko.mina_eur_rate () in
   let rated_tx_total =
     rate *. float_of_int tx_total |> truncate |> Decimal.of_nano
