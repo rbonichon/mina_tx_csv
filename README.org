@@ -1,0 +1,10 @@
+This is a standalone OCaml program to emit a Koinly compatible csv document for
+a Mina ledger address.
+
+This is largely inspired by the [[https://github.com/garethtdavies/mina-taxes][backend code]] for https://export.minaexplorer.com/.
+
+* Example
+
+#+begin_src sh
+  dune exec ./bin/main.exe -- -addr <B62my_mina_address>
+#+end_src
