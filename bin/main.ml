@@ -44,8 +44,8 @@ module Tx = struct
       }
     | Pseudo of { amount : nano; date : string; hash : string; descr : string }
 
-  let[@warning "-8"] pseudo_of_concrete ~amount ?descr (Concrete { date; hash; descr = d; _ })
-      =
+  let[@warning "-8"] pseudo_of_concrete ~amount ?descr
+      (Concrete { date; hash; descr = d; _ }) =
     Pseudo
       {
         amount;
@@ -152,7 +152,16 @@ module Transactions = struct
 end
 
 module Params = struct
-  let addr = ref "B62qip7NtNvAnqkEY6oZZCtn9x2YHY8kQaP6ddBYuhhrzpFbeW3abc5"
+  let get_addr, set_addr =
+    let a = ref None in
+    ( (fun () ->
+        match !a with
+        | None ->
+            Format.eprintf "No address set. Please set one with the -addr flag.";
+            exit 1
+        | Some a -> a),
+      fun addr -> a := Some addr )
+
   let limit = ref 10000
 
   let set_node_uri, get_node_uri =
@@ -164,7 +173,7 @@ let args =
   Arg.align
     [
       ( "-addr",
-        Arg.Set_string Params.addr,
+        Arg.String Params.set_addr,
         " set account address for which to get transactions history" );
       ("-limit", Arg.Set_int Params.limit, " get at most <limit> transactions");
       ("-url", Arg.String Params.set_node_uri, " query endpoint at <url>");
@@ -184,7 +193,7 @@ let extract_data json_resp =
 
 let parse_body body =
   Ezjsonm.from_string body |> extract_data
-  |> Transactions.of_json !Params.addr
+  |> Transactions.of_json @@ Params.get_addr ()
   |> List.rev
 
 let trace ~f ppf txt =
@@ -220,17 +229,21 @@ let output_csv ~filename ~txs () =
 
 let main () =
   let open Lwt.Syntax in
-  Arg.parse args (fun _ -> ()) "";
-  let addr = !Params.addr in
+  let other_args = ref [] in
+  Arg.parse args (fun s -> other_args := s :: !other_args) "";
+  let other_args = List.rev !other_args in
+
+  let addr = Params.get_addr () in
   let limit = !Params.limit in
-  let txs =
-    if Array.length Sys.argv > 1 then (
-      let filename = Sys.argv.(1) in
-      assert (Sys.file_exists filename);
-      Transactions.of_file !Params.addr filename)
-    else Lwt_main.run @@ body limit addr
+  let* txs =
+    match other_args with
+    | filename :: _ ->
+        assert (Sys.file_exists filename);
+        Lwt.return @@ Transactions.of_file addr filename 
+    | [] -> body limit addr
   in
-  let filename = Printf.sprintf "koinly_%s.csv" !Params.addr in
+
+  let filename = Printf.sprintf "koinly_%s.csv" addr in
   trace Format.std_formatter "Writing file %s" filename
     ~f:(output_csv ~filename ~txs);
   let tx_total = Transactions.total txs in
