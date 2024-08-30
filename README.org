@@ -5,6 +5,14 @@ This is largely inspired by the [[https://github.com/garethtdavies/mina-taxes][b
 
 * Example
 
+Assuming you retrieve the data from a live node, the following command suffices.
+
 #+begin_src sh
   dune exec ./bin/main.exe -- -addr <B62my_mina_address>
+#+end_src
+
+Or, if you already have downloade a JSON file that has the transactions you want to export:
+
+#+begin_src sh
+ dune exec ./bin/main.exe -- -addr <B62my_mina_address> transactions.json          
 #+end_src
