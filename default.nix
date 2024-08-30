@@ -9,13 +9,9 @@ let
       ocamlformat
       camlpkgs.merlin
       camlpkgs.findlib
-      camlpkgs.calendar
-      camlpkgs.xml-light
       camlpkgs.cohttp
       camlpkgs.cohttp-lwt
       camlpkgs.cohttp-lwt-unix
-      camlpkgs.lwt
-      camlpkgs.lwt-unix
       camlpkgs.ezjsonm
       camlpkgs.tezos-base58
       camlpkgs.utop
