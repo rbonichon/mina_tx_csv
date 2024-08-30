@@ -6,11 +6,8 @@
   -warn-error
   +a-69)
  (libraries
-  calendar
   cohttp
   cohttp-lwt-unix
   ezjsonm
   lwt
-  tezos-base58
-  xml-light)
- )
+  tezos-base58))
